@@ -8,7 +8,7 @@ import SessionList from "./components/SessionList.vue";
 import TaskList from "./components/TaskList.vue";
 import MessageContent from "./components/MessageContent.vue";
 import ToolActivity from "./components/ToolActivity.vue";
-import type { HostStatus, PocketTask, Project, Session, SessionDetail, ThreadItem, UploadedAttachment } from "./types";
+import type { HostStatus, PocketTask, Project, Session, SessionDetail, ThreadItem, UploadedAttachment, WeChatMonitorStatus } from "./types";
 
 type Tab = "home" | "tasks" | "projects" | "history" | "settings";
 type TimelineKind = "user" | "agent" | "reasoning" | "command" | "file" | "mcp" | "tool";
@@ -72,7 +72,13 @@ const sessionRunning = ref(false);
 const liveItems = ref<LiveTimelineItem[]>([]);
 const timeline = ref<HTMLElement | null>(null);
 const displayedTurnCount = ref(10);
+const weChatMonitor = ref<WeChatMonitorStatus | null>(null);
+const weChatThreadId = ref("");
+const weChatIntervalSeconds = ref(60);
+const weChatMonitorBusy = ref(false);
+const weChatMonitorError = ref("");
 let connection: HubConnection | null = null;
+let weChatMonitorTimer: number | null = null;
 
 const normalizedSearch = computed(() => activeSearch.value.trim().toLocaleLowerCase());
 const filteredProjects = computed(() => filterBySearch(projects.value, project => [project.name, project.workingDirectory, project.lastSessionTitle]));
@@ -106,6 +112,7 @@ onMounted(async () => {
 
 async function startApplication() {
   await refresh();
+  startWeChatMonitorPolling();
   try {
     connection = await connectRealtime({
       taskCreated: upsertTask,
@@ -117,20 +124,27 @@ async function startApplication() {
   } catch { realtimeConnected.value = false; }
 }
 
-onBeforeUnmount(() => { void connection?.stop(); });
+onBeforeUnmount(() => {
+  void connection?.stop();
+  if (weChatMonitorTimer !== null) window.clearInterval(weChatMonitorTimer);
+});
 
 async function refresh() {
   loading.value = true;
   error.value = "";
   try {
-    const [hostResult, projectResult, sessionResult, taskResult, rootResult] = await Promise.all([
-      api.host(), api.projects(), api.sessions("", selectedProject.value?.workingDirectory || ""), api.tasks(), api.projectRoots()
+    const [hostResult, projectResult, sessionResult, taskResult, rootResult, weChatResult] = await Promise.all([
+      api.host(), api.projects(), api.sessions("", selectedProject.value?.workingDirectory || ""), api.tasks(), api.projectRoots(), api.weChatMonitor()
     ]);
     host.value = hostResult;
     projects.value = projectResult;
     sessions.value = sessionResult.items;
     tasks.value = taskResult;
     projectRoots.value = rootResult;
+    weChatMonitor.value = weChatResult;
+    if (weChatResult.threadId) weChatThreadId.value = weChatResult.threadId;
+    else if (!weChatThreadId.value && sessionResult.items.length) weChatThreadId.value = sessionResult.items[0].id;
+    if (weChatResult.running) weChatIntervalSeconds.value = weChatResult.intervalSeconds;
     if (!projectForm.workingDirectory && rootResult.length) projectForm.workingDirectory = rootResult[0] + "\\NewProject";
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : "连接开发机失败";
@@ -174,6 +188,57 @@ async function logout() {
   projects.value = [];
   sessions.value = [];
   tasks.value = [];
+  weChatMonitor.value = null;
+  if (weChatMonitorTimer !== null) window.clearInterval(weChatMonitorTimer);
+  weChatMonitorTimer = null;
+}
+
+function startWeChatMonitorPolling() {
+  if (weChatMonitorTimer !== null) window.clearInterval(weChatMonitorTimer);
+  weChatMonitorTimer = window.setInterval(() => { if (authenticated.value) void loadWeChatMonitor(); }, 5000);
+}
+
+async function loadWeChatMonitor() {
+  try
+  {
+    weChatMonitor.value = await api.weChatMonitor();
+    if (weChatMonitor.value.threadId) weChatThreadId.value = weChatMonitor.value.threadId;
+    if (weChatMonitor.value.running) weChatIntervalSeconds.value = weChatMonitor.value.intervalSeconds;
+  }
+  catch { }
+}
+
+async function refreshWeChatInstances() {
+  if (weChatMonitorBusy.value) return;
+  weChatMonitorBusy.value = true;
+  weChatMonitorError.value = "";
+  try { weChatMonitor.value = await api.refreshWeChatInstances(); }
+  catch (reason) { weChatMonitorError.value = reason instanceof Error ? reason.message : "刷新微信实例失败"; }
+  finally { weChatMonitorBusy.value = false; }
+}
+
+async function startWeChatMonitor() {
+  if (!weChatThreadId.value || weChatMonitorBusy.value) return;
+  weChatMonitorBusy.value = true;
+  weChatMonitorError.value = "";
+  try { weChatMonitor.value = await api.startWeChatMonitor(weChatThreadId.value, weChatIntervalSeconds.value); }
+  catch (reason) { weChatMonitorError.value = reason instanceof Error ? reason.message : "启动微信监控失败"; }
+  finally { weChatMonitorBusy.value = false; }
+}
+
+async function stopWeChatMonitor() {
+  if (weChatMonitorBusy.value) return;
+  weChatMonitorBusy.value = true;
+  weChatMonitorError.value = "";
+  try { weChatMonitor.value = await api.stopWeChatMonitor(); }
+  catch (reason) { weChatMonitorError.value = reason instanceof Error ? reason.message : "停止微信监控失败"; }
+  finally { weChatMonitorBusy.value = false; }
+}
+
+async function renameWeChatInstance(id: string, event: Event) {
+  const name = (event.target as HTMLInputElement).value;
+  try { weChatMonitor.value = await api.renameWeChatInstance(id, name); }
+  catch (reason) { weChatMonitorError.value = reason instanceof Error ? reason.message : "修改微信名称失败"; }
 }
 
 async function openSession(id: string) {
@@ -740,6 +805,50 @@ function statusName(status: string) {
           <div class="setting-row"><span>数据库</span><strong>SQLite / Tasks</strong></div>
           <div class="setting-row"><span>远程访问</span><strong>Tailscale 私网</strong></div>
         </div>
+        <section class="wechat-monitor-card">
+          <header>
+            <div><span class="eyebrow">WECHAT MONITOR</span><h3>微信消息监控</h3></div>
+            <span :class="['monitor-status', weChatMonitor?.running ? 'running' : 'stopped']">{{ weChatMonitor?.running ? '运行中' : '已停止' }}</span>
+          </header>
+          <label class="monitor-thread">提醒目标会话
+            <select v-model="weChatThreadId" :disabled="weChatMonitor?.running || weChatMonitorBusy">
+              <option value="" disabled>请选择 Codex 会话</option>
+              <option v-for="session in sessions" :key="session.id" :value="session.id">{{ session.title }} · {{ session.projectName }}</option>
+            </select>
+          </label>
+          <label class="monitor-thread">扫描间隔
+            <select v-model.number="weChatIntervalSeconds" :disabled="weChatMonitor?.running || weChatMonitorBusy">
+              <option :value="15">15 秒</option>
+              <option :value="30">30 秒</option>
+              <option :value="60">1 分钟</option>
+              <option :value="120">2 分钟</option>
+              <option :value="300">5 分钟</option>
+              <option :value="600">10 分钟</option>
+            </select>
+          </label>
+          <div class="monitor-actions">
+            <button class="secondary-button" :disabled="weChatMonitorBusy" @click="refreshWeChatInstances">刷新实例</button>
+            <button v-if="!weChatMonitor?.running" class="primary-button" :disabled="weChatMonitorBusy || !weChatThreadId" @click="startWeChatMonitor">{{ weChatMonitorBusy ? '处理中…' : '启动监控' }}</button>
+            <button v-else class="danger-button" :disabled="weChatMonitorBusy" @click="stopWeChatMonitor">{{ weChatMonitorBusy ? '处理中…' : '停止监控' }}</button>
+          </div>
+          <div class="monitor-summary">
+            <span>每 {{ weChatMonitor?.intervalSeconds || 60 }} 秒扫描</span>
+            <span>待发送 {{ weChatMonitor?.pendingMessageCount || 0 }} 条</span>
+            <span>最近扫描 {{ weChatMonitor?.lastScanAt ? new Date(weChatMonitor.lastScanAt).toLocaleTimeString() : '暂无' }}</span>
+          </div>
+          <div v-if="weChatMonitorError || weChatMonitor?.lastError" class="monitor-error">{{ weChatMonitorError || weChatMonitor?.lastError }}</div>
+          <div v-if="!weChatMonitor?.instances.length" class="monitor-empty">未发现已打开的微信主窗口</div>
+          <div v-else class="wechat-instance-list">
+            <article v-for="instance in weChatMonitor.instances" :key="instance.id" class="wechat-instance">
+              <div><strong>{{ instance.displayName }}</strong><small>PID {{ instance.processId }} · {{ instance.windowState === 'minimized' ? '已最小化' : '窗口可见' }}</small></div>
+              <span :class="instance.online && instance.loggedIn ? 'online' : 'offline'">{{ instance.online ? (instance.loggedIn ? '已登录' : '待识别') : '离线' }}</span>
+              <input class="wechat-alias" :placeholder="'自定义名称，例如：工作微信'" :disabled="weChatMonitor?.running" @change="renameWeChatInstance(instance.id, $event)">
+              <p>未读 {{ instance.lastUnreadCount }} 条 · 最近扫描 {{ instance.lastScanAt ? new Date(instance.lastScanAt).toLocaleTimeString() : '暂无' }}</p>
+              <em v-if="instance.lastError">{{ instance.lastError }}</em>
+            </article>
+          </div>
+          <div class="monitor-warning">监控只读取会话列表中的最新消息预览，不会打开聊天或标记已读。多个微信窗口扫描时可能依次短暂闪现。</div>
+        </section>
         <button class="logout-button" @click="logout">退出登录</button>
         <div class="notice">当前支持历史项目与会话、独立任务、启动、中断和实时状态。手机审批界面尚未接入，因此任务按工作区写入且不弹出审批。</div>
       </template>

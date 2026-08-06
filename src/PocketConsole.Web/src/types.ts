@@ -56,3 +56,29 @@ export type UploadedAttachment = { id: string; name: string; contentType: string
 
 export type CreateProject = { name: string; workingDirectory: string; createDirectory: boolean };
 export type CreateSession = { projectPath: string; message: string; attachmentIds?: string[] };
+
+export type WeChatInstance = {
+  id: string;
+  number: number;
+  displayName: string;
+  windowHandle: number;
+  processId: number;
+  online: boolean;
+  loggedIn: boolean;
+  windowState: string;
+  lastSeenAt: string | null;
+  lastScanAt: string | null;
+  lastUnreadCount: number;
+  lastError: string | null;
+};
+
+export type WeChatMonitorStatus = {
+  running: boolean;
+  threadId: string | null;
+  intervalSeconds: number;
+  lastScanAt: string | null;
+  lastNotificationAt: string | null;
+  pendingMessageCount: number;
+  lastError: string | null;
+  instances: WeChatInstance[];
+};

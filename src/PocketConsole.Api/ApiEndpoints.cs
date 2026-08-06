@@ -46,6 +46,33 @@ public static class ApiEndpoints
             catch (Exception exception) { return Results.Problem(exception.Message, statusCode: 503); }
         });
 
+        api.MapGet("/wechat-monitor/status", (WeChatMonitorService service) => Results.Ok(service.GetStatus()));
+
+        api.MapPost("/wechat-monitor/start", async (StartWeChatMonitorVo vo, WeChatMonitorService service, CancellationToken token) =>
+        {
+            try { return Results.Ok(await service.StartAsync(vo.ThreadId, vo.IntervalSeconds, token)); }
+            catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
+            catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+            catch (Exception exception) { return Results.Problem(exception.Message, statusCode: 502); }
+        });
+
+        api.MapPost("/wechat-monitor/stop", async (WeChatMonitorService service) => Results.Ok(await service.StopAsync()));
+
+        api.MapPost("/wechat-monitor/refresh-instances", async (WeChatMonitorService service, CancellationToken token) =>
+            Results.Ok(await service.RefreshInstancesAsync(token)));
+
+        api.MapPost("/wechat-monitor/refresh-profile-names", async (WeChatMonitorService service, CancellationToken token) =>
+        {
+            try { return Results.Ok(await service.RefreshProfileNamesAsync(token)); }
+            catch (Exception exception) { return Results.Problem(exception.Message, statusCode: 502); }
+        });
+
+        api.MapPost("/wechat-monitor/instances/{id}/name", (string id, RenameWeChatInstanceVo vo, WeChatMonitorService service) =>
+        {
+            try { return Results.Ok(service.RenameInstance(id, vo.Name)); }
+            catch (KeyNotFoundException) { return Results.NotFound(); }
+        });
+
         api.MapGet("/sessions", async (CodexThreadService service, string? search, string? cwd, bool archived = false, int limit = 50, CancellationToken token = default) =>
             Results.Ok(await service.ListSessionsAsync(search, cwd, archived, Math.Clamp(limit, 1, 100), token)));
 

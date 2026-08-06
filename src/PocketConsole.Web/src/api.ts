@@ -1,4 +1,4 @@
-import type { AuthStatus, CreateProject, CreateSession, CreateTask, HostStatus, PocketTask, Project, Session, SessionDetail, UploadedAttachment } from "./types";
+import type { AuthStatus, CreateProject, CreateSession, CreateTask, HostStatus, PocketTask, Project, Session, SessionDetail, UploadedAttachment, WeChatMonitorStatus } from "./types";
 
 async function errorMessage(response: Response) {
   const text = await response.text();
@@ -68,6 +68,11 @@ export const api = {
   login: (password: string) => send<AuthStatus>("/api/auth/login", "POST", { password }),
   logout: () => send<void>("/api/auth/logout", "POST"),
   host: () => request<HostStatus>("/api/host/status"),
+  weChatMonitor: () => request<WeChatMonitorStatus>("/api/wechat-monitor/status"),
+  startWeChatMonitor: (threadId: string, intervalSeconds = 60) => send<WeChatMonitorStatus>("/api/wechat-monitor/start", "POST", { threadId, intervalSeconds }),
+  stopWeChatMonitor: () => send<WeChatMonitorStatus>("/api/wechat-monitor/stop", "POST"),
+  refreshWeChatInstances: () => send<WeChatMonitorStatus>("/api/wechat-monitor/refresh-instances", "POST"),
+  renameWeChatInstance: (id: string, name: string) => send<WeChatMonitorStatus>("/api/wechat-monitor/instances/" + encodeURIComponent(id) + "/name", "POST", { name }),
   projects: (search = "") => request<Project[]>("/api/projects?search=" + encodeURIComponent(search)),
   projectRoots: () => request<string[]>("/api/projects/roots"),
   createProject: (project: CreateProject) => send<Project>("/api/projects", "POST", project),
