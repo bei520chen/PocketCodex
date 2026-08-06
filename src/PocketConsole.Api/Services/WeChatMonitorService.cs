@@ -8,6 +8,7 @@ public sealed class WeChatMonitorService(
     WeChatInstanceRegistry registry,
     CodexNotificationDispatcher dispatcher,
     CodexAppServerClient codexClient,
+    WeChatWindowCoordinator coordinator,
     ILogger<WeChatMonitorService> logger)
 {
     private readonly object _stateLock = new();
@@ -151,6 +152,7 @@ public sealed class WeChatMonitorService(
 
     private async Task ScanAsync(CancellationToken cancellationToken)
     {
+        await coordinator.Gate.WaitAsync(cancellationToken);
         var foreground = WeChatNative.GetForeground();
         try
         {
@@ -181,6 +183,7 @@ public sealed class WeChatMonitorService(
         {
             WeChatNative.RestoreForeground(foreground);
             lock (_stateLock) _lastScanAt = DateTimeOffset.Now;
+            coordinator.Gate.Release();
         }
     }
 

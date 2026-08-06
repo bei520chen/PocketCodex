@@ -73,6 +73,22 @@ public static class ApiEndpoints
             catch (KeyNotFoundException) { return Results.NotFound(); }
         });
 
+        api.MapGet("/wechat-reply/instances/{id}/contacts", async (string id, WeChatReplyService service, CancellationToken token) =>
+        {
+            try { return Results.Ok(await service.GetContactsAsync(id, token)); }
+            catch (KeyNotFoundException) { return Results.NotFound(new { error = "微信实例不存在或已经离线。" }); }
+            catch (Exception exception) { return Results.Problem(exception.Message, statusCode: 502); }
+        });
+
+        api.MapPost("/wechat-reply/send", async (SendWeChatMessageVo vo, WeChatReplyService service, CancellationToken token) =>
+        {
+            try { return Results.Ok(await service.SendAsync(vo, token)); }
+            catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
+            catch (KeyNotFoundException) { return Results.NotFound(new { error = "微信实例不存在或已经离线。" }); }
+            catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+            catch (Exception exception) { return Results.Problem(exception.Message, statusCode: 502); }
+        });
+
         api.MapGet("/sessions", async (CodexThreadService service, string? search, string? cwd, bool archived = false, int limit = 50, CancellationToken token = default) =>
             Results.Ok(await service.ListSessionsAsync(search, cwd, archived, Math.Clamp(limit, 1, 100), token)));
 

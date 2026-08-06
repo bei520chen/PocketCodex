@@ -20,6 +20,9 @@ internal static class WeChatNative
     private const uint RedrawUpdateNow = 0x0100;
     private const uint RedrawFrame = 0x0400;
     private const uint RedrawAllChildren = 0x0080;
+    private const byte VkControl = 0x11;
+    private const byte VkV = 0x56;
+    private const uint KeyEventKeyUp = 0x0002;
 
     internal static IReadOnlyList<NativeWeChatWindow> DiscoverWindows()
     {
@@ -212,6 +215,33 @@ internal static class WeChatNative
         return new ConversationRowText(name, preview);
     }
 
+    internal static async Task<IReadOnlyList<string>> ReadConversationContactsAsync(Bitmap bitmap, int paneRight, CancellationToken cancellationToken)
+    {
+        var rows = await ReadConversationContactRowsAsync(bitmap, paneRight, cancellationToken);
+        return rows.Select(item => item.Name).Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    internal static async Task<IReadOnlyList<ConversationContactRow>> ReadConversationContactRowsAsync(Bitmap bitmap, int paneRight, CancellationToken cancellationToken)
+    {
+        var region = new Rectangle(68, 74, Math.Max(1, paneRight - 68), Math.Max(1, bitmap.Height - 110));
+        var lines = await ReadTextAsync(bitmap, region, 3, cancellationToken);
+        var result = new List<ConversationContactRow>();
+        const int firstNameCenterY = 111;
+        const int rowHeight = 65;
+        for (var nameCenterY = firstNameCenterY; nameCenterY < bitmap.Height - 70; nameCenterY += rowHeight)
+        {
+            var name = lines
+                .Where(line => line.Bounds.Left >= 78 && line.Bounds.Right < paneRight - 35)
+                .Where(line => Math.Abs(line.Bounds.Top + line.Bounds.Height / 2f - nameCenterY) <= 14)
+                .OrderBy(line => Math.Abs(line.Bounds.Top + line.Bounds.Height / 2f - nameCenterY))
+                .ThenBy(line => line.Bounds.Left)
+                .Select(line => CleanConversationName(line.Text))
+                .FirstOrDefault(IsUsefulContactName);
+            if (!string.IsNullOrWhiteSpace(name)) result.Add(new ConversationContactRow(name, nameCenterY + 3));
+        }
+        return result;
+    }
+
     internal static int? FindSelectedConversationY(Bitmap bitmap, int paneRight)
     {
         for (var y = 85; y < bitmap.Height - 40; y += 4)
@@ -251,6 +281,48 @@ internal static class WeChatNative
     {
         await ClickWindowPointAsync(window.Handle, Math.Min(paneRight - 35, 175), rowY, cancellationToken);
         await Task.Delay(250, cancellationToken);
+    }
+
+    internal static async Task<string?> ReadCurrentChatTitleAsync(NativeWeChatWindow window, int paneRight, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            if (attempt > 0) await Task.Delay(250, cancellationToken);
+            using var image = attempt < 3 ? Capture(window.Handle) : CaptureScreen(window.Handle);
+            var region = new Rectangle(paneRight, 28, Math.Max(1, image.Width - paneRight - 90), 76);
+            var lines = await ReadTextAsync(image, region, 4, cancellationToken);
+            var title = lines
+                .Where(line => line.Bounds.Left >= paneRight + 5 && line.Bounds.Top < 88)
+                .OrderBy(line => line.Bounds.Top)
+                .ThenBy(line => line.Bounds.Left)
+                .Select(line => CleanConversationName(line.Text))
+                .FirstOrDefault(IsUsefulContactName);
+            if (!string.IsNullOrWhiteSpace(title)) return title;
+        }
+        return null;
+    }
+
+    internal static bool ChatTitleMatches(string title, string contact)
+    {
+        static string NormalizeTitle(string value) => System.Text.RegularExpressions.Regex.Replace(
+            NormalizeText(value),
+            "[（(]\\d+[）)]$",
+            string.Empty).Trim('"', '“', '”', '。', '.', '，', ',');
+        return NormalizeTitle(title).Equals(NormalizeTitle(contact), StringComparison.Ordinal);
+    }
+
+    internal static async Task SendTextMessageAsync(NativeWeChatWindow window, string message, CancellationToken cancellationToken)
+    {
+        using var image = Capture(window.Handle);
+        await ClickWindowPointAsync(window.Handle, Math.Max(320, image.Width - 360), Math.Max(300, image.Height - 105), cancellationToken);
+        await SetClipboardTextAsync(message, cancellationToken);
+        keybd_event(VkControl, 0, 0, UIntPtr.Zero);
+        keybd_event(VkV, 0, 0, UIntPtr.Zero);
+        keybd_event(VkV, 0, KeyEventKeyUp, UIntPtr.Zero);
+        keybd_event(VkControl, 0, KeyEventKeyUp, UIntPtr.Zero);
+        await Task.Delay(180, cancellationToken);
+        await ClickWindowPointAsync(window.Handle, Math.Max(320, image.Width - 55), Math.Max(300, image.Height - 43), cancellationToken);
+        await Task.Delay(350, cancellationToken);
     }
 
     internal static async Task<string?> ReadProfileNicknameAsync(NativeWeChatWindow window, CancellationToken cancellationToken)
@@ -348,6 +420,18 @@ internal static class WeChatNative
         value = System.Text.RegularExpressions.Regex.Replace(value, "^[:：,，.。·•丨|]+", string.Empty);
         return string.IsNullOrWhiteSpace(value) ? text : value;
     }
+    private static string CleanConversationName(string text)
+    {
+        var value = NormalizeText(text).Trim('、', '，', ',', '.', '。', '“', '”', '"', '丨', '|');
+        value = System.Text.RegularExpressions.Regex.Replace(value, "^(?:[0-9]+|[\\[【(（][0-9]+[\\]】)）])", string.Empty);
+        return value.Trim('、', '，', ',', '.', '。', '“', '”', '"', '丨', '|');
+    }
+    private static bool IsUsefulContactName(string? text) =>
+        !string.IsNullOrWhiteSpace(text) &&
+        text.Length is >= 1 and <= 48 &&
+        text.Any(character => char.IsLetterOrDigit(character) || char.GetUnicodeCategory(character) == System.Globalization.UnicodeCategory.OtherLetter) &&
+        !System.Text.RegularExpressions.Regex.IsMatch(text, "^[0-9:：,，.。·•丨|/\\\\]+$") &&
+        text is not "搜索" and not "文件传输助手";
     private static IReadOnlyList<string> ExtractLatestIncomingMessages(IReadOnlyList<OcrTextLine> lines, int paneRight, int imageWidth, int expectedCount)
     {
         var incomingRight = paneRight + (imageWidth - paneRight) * 0.6f;
@@ -439,6 +523,24 @@ internal static class WeChatNative
         if (previous is { } cursor) SetCursorPos(cursor.X, cursor.Y);
         await Task.Delay(120, cancellationToken);
     }
+    private static Task SetClipboardTextAsync(string text, CancellationToken cancellationToken)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                System.Windows.Forms.Clipboard.SetText(text);
+                completion.SetResult();
+            }
+            catch (Exception exception) { completion.SetException(exception); }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = true;
+        thread.Start();
+        cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken));
+        return completion.Task;
+    }
     [DllImport("user32.dll")] private static extern int GetWindowTextLengthW(IntPtr handle);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextW(IntPtr handle, StringBuilder text, int maxCount);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(IntPtr handle, StringBuilder className, int maxCount);
@@ -454,6 +556,7 @@ internal static class WeChatNative
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out Point point);
     [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extraInfo);
+    [DllImport("user32.dll")] private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
     [DllImport("user32.dll")] private static extern bool RedrawWindow(IntPtr handle, IntPtr updateRect, IntPtr updateRegion, uint flags);
 }
 
@@ -461,6 +564,7 @@ internal sealed record NativeWeChatWindow(IntPtr Handle, int ProcessId, string E
 internal sealed record OcrTextLine(string Text, RectangleF Bounds);
 internal sealed record UnreadBadge(Rectangle Bounds, int EstimatedCount);
 internal sealed record ConversationRowText(string? Name, string? Preview);
+internal sealed record ConversationContactRow(string Name, int RowY);
 
 [StructLayout(LayoutKind.Sequential)]
 internal struct NativeRect

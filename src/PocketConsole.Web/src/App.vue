@@ -77,6 +77,13 @@ const weChatThreadId = ref("");
 const weChatIntervalSeconds = ref(60);
 const weChatMonitorBusy = ref(false);
 const weChatMonitorError = ref("");
+const weChatReplyInstanceId = ref("");
+const weChatReplyContacts = ref<string[]>([]);
+const weChatReplyContact = ref("");
+const weChatReplyMessage = ref("");
+const weChatReplyBusy = ref(false);
+const weChatReplyError = ref("");
+const weChatReplySuccess = ref("");
 let connection: HubConnection | null = null;
 let weChatMonitorTimer: number | null = null;
 
@@ -239,6 +246,39 @@ async function renameWeChatInstance(id: string, event: Event) {
   const name = (event.target as HTMLInputElement).value;
   try { weChatMonitor.value = await api.renameWeChatInstance(id, name); }
   catch (reason) { weChatMonitorError.value = reason instanceof Error ? reason.message : "修改微信名称失败"; }
+}
+
+async function refreshWeChatContacts() {
+  if (!weChatReplyInstanceId.value || weChatReplyBusy.value) return;
+  weChatReplyBusy.value = true;
+  weChatReplyError.value = "";
+  weChatReplySuccess.value = "";
+  try {
+    const result = await api.weChatContacts(weChatReplyInstanceId.value);
+    weChatReplyContacts.value = result.contacts;
+    if (!result.contacts.includes(weChatReplyContact.value)) weChatReplyContact.value = "";
+  }
+  catch (reason) { weChatReplyError.value = reason instanceof Error ? reason.message : "读取微信联系人失败"; }
+  finally { weChatReplyBusy.value = false; }
+}
+
+async function sendWeChatReply() {
+  const instance = weChatMonitor.value?.instances.find(item => item.id === weChatReplyInstanceId.value);
+  const contact = weChatReplyContact.value.trim();
+  const message = weChatReplyMessage.value.trim();
+  if (!instance || !contact || !message || weChatReplyBusy.value) return;
+  const confirmed = window.confirm(`将通过 ${instance.displayName} 向“${contact}”发送：\n\n${message}\n\n确认发送吗？`);
+  if (!confirmed) return;
+  weChatReplyBusy.value = true;
+  weChatReplyError.value = "";
+  weChatReplySuccess.value = "";
+  try {
+    const result = await api.sendWeChatMessage(instance.id, contact, message);
+    weChatReplySuccess.value = `已通过 ${result.instanceName} 发送给 ${result.contactName}`;
+    weChatReplyMessage.value = "";
+  }
+  catch (reason) { weChatReplyError.value = reason instanceof Error ? reason.message : "微信消息发送失败"; }
+  finally { weChatReplyBusy.value = false; }
 }
 
 async function openSession(id: string) {
@@ -847,7 +887,29 @@ function statusName(status: string) {
               <em v-if="instance.lastError">{{ instance.lastError }}</em>
             </article>
           </div>
-          <div class="monitor-warning">监控只读取会话列表中的最新消息预览，不会打开聊天或标记已读。多个微信窗口扫描时可能依次短暂闪现。</div>
+          <div class="monitor-warning">发现新增数字未读后会依次打开聊天读取完整消息，因此会将这些微信消息标为已读。多个微信窗口扫描时可能短暂闪现。</div>
+        </section>
+        <section class="wechat-monitor-card wechat-reply-card">
+          <header><div><span class="eyebrow">WECHAT REPLY</span><h3>微信联系人回复</h3></div></header>
+          <label class="monitor-thread">发送账号
+            <select v-model="weChatReplyInstanceId" :disabled="weChatReplyBusy" @change="weChatReplyContacts = []; weChatReplyContact = ''">
+              <option value="" disabled>请选择微信账号</option>
+              <option v-for="instance in weChatMonitor?.instances.filter(item => item.online) || []" :key="instance.id" :value="instance.id">{{ instance.displayName }}</option>
+            </select>
+          </label>
+          <div class="monitor-actions"><button class="secondary-button" :disabled="weChatReplyBusy || !weChatReplyInstanceId" @click="refreshWeChatContacts">{{ weChatReplyBusy ? '处理中…' : '刷新联系人' }}</button></div>
+          <label class="monitor-thread">联系人或群聊
+            <input v-model="weChatReplyContact" list="wechat-contact-options" maxlength="80" placeholder="选择或输入当前会话列表中的名称">
+            <datalist id="wechat-contact-options"><option v-for="contact in weChatReplyContacts" :key="contact" :value="contact" /></datalist>
+          </label>
+          <label class="monitor-thread">回复内容
+            <textarea v-model="weChatReplyMessage" maxlength="1000" rows="4" placeholder="请输入要发送的文本消息" />
+          </label>
+          <div class="reply-counter">{{ weChatReplyMessage.length }} / 1000</div>
+          <div v-if="weChatReplyError" class="monitor-error">{{ weChatReplyError }}</div>
+          <div v-if="weChatReplySuccess" class="reply-success">{{ weChatReplySuccess }}</div>
+          <button class="primary-button full" :disabled="weChatReplyBusy || !weChatReplyInstanceId || !weChatReplyContact.trim() || !weChatReplyMessage.trim()" @click="sendWeChatReply">{{ weChatReplyBusy ? '发送中…' : '确认并发送' }}</button>
+          <div class="monitor-warning">发送前会再次显示账号、联系人和正文确认。程序会核对微信聊天标题，无法精确匹配时不会发送。</div>
         </section>
         <button class="logout-button" @click="logout">退出登录</button>
         <div class="notice">当前支持历史项目与会话、独立任务、启动、中断和实时状态。手机审批界面尚未接入，因此任务按工作区写入且不弹出审批。</div>

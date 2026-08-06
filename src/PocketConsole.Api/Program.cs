@@ -27,8 +27,10 @@ builder.Services.AddSingleton<CodexAppServerClient>();
 builder.Services.AddSingleton<CodexThreadService>();
 builder.Services.AddSingleton<AttachmentService>();
 builder.Services.AddSingleton<WeChatInstanceRegistry>();
+builder.Services.AddSingleton<WeChatWindowCoordinator>();
 builder.Services.AddSingleton<CodexNotificationDispatcher>();
 builder.Services.AddSingleton<WeChatMonitorService>();
+builder.Services.AddSingleton<WeChatReplyService>();
 builder.Services.AddDbContext<PocketConsoleDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("PocketConsole")));
 builder.Services.AddScoped<ProjectService>();

@@ -82,3 +82,6 @@ export type WeChatMonitorStatus = {
   lastError: string | null;
   instances: WeChatInstance[];
 };
+
+export type WeChatContacts = { instanceId: string; instanceName: string; contacts: string[] };
+export type SendWeChatMessageResult = { sent: boolean; instanceName: string; contactName: string; sentAt: string };
