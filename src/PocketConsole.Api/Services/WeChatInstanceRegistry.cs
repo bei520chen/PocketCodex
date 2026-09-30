@@ -70,6 +70,8 @@ internal sealed class WeChatInstanceState(string id, int number, NativeWeChatWin
     public string? LastError { get; set; }
     public bool BaselineReady { get; set; }
     public Dictionary<string, ConversationBaseline> Conversations { get; } = new(StringComparer.Ordinal);
+    // 仅在本次服务运行期间保存“完整聊天标题 -> 可见行坐标”，不写数据库或日志。
+    public Dictionary<string, int> VisibleContactRows { get; } = new(StringComparer.Ordinal);
     public HashSet<string> ReportedFailures { get; } = new(StringComparer.Ordinal);
     public string? CustomName { get; set; }
     public string? DetectedName { get; set; }

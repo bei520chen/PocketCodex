@@ -909,7 +909,7 @@ function statusName(status: string) {
           <div v-if="weChatReplyError" class="monitor-error">{{ weChatReplyError }}</div>
           <div v-if="weChatReplySuccess" class="reply-success">{{ weChatReplySuccess }}</div>
           <button class="primary-button full" :disabled="weChatReplyBusy || !weChatReplyInstanceId || !weChatReplyContact.trim() || !weChatReplyMessage.trim()" @click="sendWeChatReply">{{ weChatReplyBusy ? '发送中…' : '确认并发送' }}</button>
-          <div class="monitor-warning">发送前会再次显示账号、联系人和正文确认。程序会核对微信聊天标题，无法精确匹配时不会发送。</div>
+          <div class="monitor-warning">刷新联系人会逐条打开当前可见的普通会话读取顶部完整标题，因此可能将这些会话标为已读，微信窗口也可能短暂闪现；服务号、公众号、订阅号、折叠会话和文件传输助手等特殊入口不会点击或显示。发送前会再次核对标题，无法精确匹配时不会发送。</div>
         </section>
         <button class="logout-button" @click="logout">退出登录</button>
         <div class="notice">当前支持历史项目与会话、独立任务、启动、中断和实时状态。手机审批界面尚未接入，因此任务按工作区写入且不弹出审批。</div>
@@ -932,7 +932,7 @@ function statusName(status: string) {
 
     <div v-if="showProjectForm" class="sheet-backdrop" @click="showProjectForm = false">
       <section class="sheet form-sheet" @click.stop><div class="sheet-handle" /><header><div><span class="eyebrow">NEW PROJECT</span><h2>&#21019;&#24314;&#39033;&#30446;</h2></div><button @click="showProjectForm = false">&#215;</button></header>
-        <form @submit.prevent="createProject"><label>&#39033;&#30446;&#21517;&#31216;<input v-model="projectForm.name" placeholder="&#20363;&#22914;&#65306;my-app" @input="projectFormError = ''"></label><label>&#30005;&#33041;&#30446;&#24405;<input v-model="projectForm.workingDirectory" placeholder="D:\Desktop\Projects\my-app" @input="projectFormError = ''"></label><small v-if="projectRoots.length" class="form-hint">&#20801;&#35768;&#30340;&#26681;&#30446;&#24405;&#65306;{{ projectRoots.join(' / ') }}</small><label class="check-row"><input v-model="projectForm.createDirectory" type="checkbox"><span>&#30446;&#24405;&#19981;&#23384;&#22312;&#26102;&#33258;&#21160;&#21019;&#24314;</span></label><div v-if="projectFormError" class="form-error">{{ projectFormError }}</div><button class="primary-button full" type="submit" :disabled="savingProject">{{ savingProject ? '????' : '????' }}</button></form>
+        <form @submit.prevent="createProject"><label>&#39033;&#30446;&#21517;&#31216;<input v-model="projectForm.name" placeholder="&#20363;&#22914;&#65306;my-app" @input="projectFormError = ''"></label><label>&#30005;&#33041;&#30446;&#24405;<input v-model="projectForm.workingDirectory" placeholder="D:\Desktop\Projects\my-app" @input="projectFormError = ''"></label><small v-if="projectRoots.length" class="form-hint">&#20801;&#35768;&#30340;&#26681;&#30446;&#24405;&#65306;{{ projectRoots.join(' / ') }}</small><label class="check-row"><input v-model="projectForm.createDirectory" type="checkbox"><span>&#30446;&#24405;&#19981;&#23384;&#22312;&#26102;&#33258;&#21160;&#21019;&#24314;</span></label><div v-if="projectFormError" class="form-error">{{ projectFormError }}</div><button class="primary-button full" type="submit" :disabled="savingProject">{{ savingProject ? '保存中…' : '创建项目' }}</button></form>
       </section>
     </div>
 

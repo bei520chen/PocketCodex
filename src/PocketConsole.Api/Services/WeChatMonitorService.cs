@@ -213,6 +213,8 @@ public sealed class WeChatMonitorService(
             var name = WeChatNative.FindConversationName(listLines, badge, paneRight)
                 ?? row.Name
                 ?? $"未识别会话 {index + 1}";
+            // 聚合入口无法安全对应具体联系人，监控不点击也不发送此类通知。
+            if (WeChatNative.IsSpecialConversationEntry(name)) continue;
             var preview = WeChatNative.FindConversationPreview(listLines, badge, paneRight, name)
                 ?? (row.Preview is { } value && !value.Equals(name, StringComparison.Ordinal) ? value : null)
                 ?? "[新消息，预览无法识别]";
@@ -237,14 +239,18 @@ public sealed class WeChatMonitorService(
                 var previewHash = Hash(item.Preview);
                 if (delta == 0) continue;
                 IReadOnlyList<string> messages;
+                var conversationName = item.Name;
                 try
                 {
-                    messages = await WeChatNative.ReadLatestConversationMessagesAsync(
+                    var result = await WeChatNative.ReadLatestConversationMessagesAsync(
                         instance.Window,
                         paneRight,
                         item.Badge,
+                        item.Name,
                         Math.Max(1, delta),
                         cancellationToken);
+                    messages = result.Messages;
+                    if (!string.IsNullOrWhiteSpace(result.Title)) conversationName = result.Title;
                     openedConversation = true;
                 }
                 catch (Exception exception)
@@ -252,10 +258,11 @@ public sealed class WeChatMonitorService(
                     logger.LogWarning(exception, "微信实例 {InstanceId} 会话完整消息读取失败", instance.Id);
                     messages = [];
                 }
+                // 识别数量少于未读增量时明确报告遗漏，避免让用户误以为已经读取全部消息。
                 var content = messages.Count > 0
-                    ? string.Join("\n", messages)
+                    ? string.Join("\n", messages.Concat(messages.Count < delta ? [$"[另有 {delta - messages.Count} 条消息未能完整识别]"] : []))
                     : delta > 1 ? $"{delta} 条新消息，最新：{item.Preview}" : item.Preview;
-                dispatcher.Enqueue(new WeChatNotification(instance.DisplayName, item.Name, content, DateTimeOffset.Now));
+                dispatcher.Enqueue(new WeChatNotification(instance.DisplayName, conversationName, content, DateTimeOffset.Now));
                 instance.Conversations[item.Name] = new ConversationBaseline(0, previewHash);
             }
         }
