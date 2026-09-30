@@ -1,0 +1,10 @@
+{
+  "name": "Codex Pocket Console",
+  "short_name": "Codex 工作台",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#17191f",
+  "theme_color": "#17191f",
+  "lang": "zh-CN",
+  "icons": []
+}
